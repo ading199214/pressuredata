@@ -18,11 +18,45 @@ from pathlib import Path
 from datetime import datetime
 
 st.set_page_config(
-    page_title="Air Pressure Machine Dashboard",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="MBR sensor data and PLC data",
+    layout="wide"
 )
+
+@st.cache_data
+def load_xlsx_data():
+    """Load and preprocess the XLSX comparison data."""
+    try:
+        # Check if files exist
+        import os
+        if not os.path.exists('Tank1.xlsx'):
+            return None, None, "Tank1.xlsx file not found"
+        if not os.path.exists('Tank1-02.xlsx'):
+            return None, None, "Tank1-02.xlsx file not found"
+            
+        # Load both XLSX files
+        tank1_df = pd.read_excel('Tank1.xlsx')
+        tank2_df = pd.read_excel('Tank1-02.xlsx')
+        
+        # Extract relevant columns
+        tank1_data = tank1_df[['曝气压力', '曝气流量']].copy()
+        tank2_data = tank2_df[['曝气压力', '曝气流量']].copy()
+        
+        # Add file identifiers
+        tank1_data['Tank'] = 'Tank1 (8.01~8.17)'
+        tank2_data['Tank'] = 'Tank1-02 (8.26~9.06)'
+        
+        # Add time index (assuming regular sampling)
+        tank1_data['Time_Index'] = range(len(tank1_data))
+        tank2_data['Time_Index'] = range(len(tank2_data))
+        
+        # Clean data - remove any null values
+        tank1_data = tank1_data.dropna()
+        tank2_data = tank2_data.dropna()
+        
+        return tank1_data, tank2_data, None
+        
+    except Exception as e:
+        return None, None, f"Error loading XLSX data: {str(e)}"
 
 @st.cache_data
 def load_pressure_data():
@@ -109,7 +143,7 @@ class PressureDashboard:
     
     def create_main_timeline(self):
         """Create the main pressure timeline visualization."""
-        st.subheader("📈 Complete Pressure Timeline")
+        st.subheader("Complete Pressure Timeline")
         
         # Sample data for performance if too large
         df_plot = self.df
@@ -189,7 +223,7 @@ class PressureDashboard:
         
         fig.update_layout(
             height=800,
-            title="Air Pressure Machine - New Segmentation (Shutdown: -0.1 to 0.1 kPa, Transition: <-0.1 OR 0.1-20 kPa, Stable: >20 kPa)",
+            title="MBR sensor and PLC data",
             showlegend=True,
             hovermode='x unified'
         )
@@ -209,7 +243,7 @@ class PressureDashboard:
     
     def create_daily_analysis(self):
         """Create daily analysis section."""
-        st.subheader("📅 Daily Analysis")
+        
         
         # Daily statistics - calculate avg_pressure using only stable data
         daily_stats_list = []
@@ -243,7 +277,7 @@ class PressureDashboard:
 
         
         # Daily statistics table
-        st.subheader("📊 Daily Statistics Table")
+        st.subheader("Pressure Sensor Daily Statistics Table")
         
         # Remove pressure_level column from display and reorder columns
         display_stats = daily_stats[['date', 'avg_pressure', 'std_pressure', 'min_pressure', 'max_pressure', 
@@ -278,11 +312,289 @@ class PressureDashboard:
         
         st.dataframe(display_stats_formatted, use_container_width=True)
         
-        st.caption("📋 **Note**: avg_pressure and std_pressure are calculated using only Stable operation data (>20 kPa)")
+        st.caption("**Note**: avg_pressure and std_pressure are calculated using only Stable operation data (>20 kPa)")
     
+    def create_xlsx_comparison(self):
+        """Create XLSX files comparison charts."""
+        st.subheader("Tank Data Comparison (XLSX Files)")
+        
+        # Load XLSX data
+        with st.spinner("Loading XLSX comparison data..."):
+            try:
+                tank1_data, tank2_data, error = load_xlsx_data()
+            except Exception as e:
+                # Fallback: try loading directly without cache
+                st.warning("Cache loading failed, trying direct load...")
+                try:
+                    import os
+                    if not os.path.exists('Tank1.xlsx'):
+                        error = "Tank1.xlsx file not found"
+                        tank1_data, tank2_data = None, None
+                    elif not os.path.exists('Tank1-02.xlsx'):
+                        error = "Tank1-02.xlsx file not found"
+                        tank1_data, tank2_data = None, None
+                    else:
+                        # Direct load without cache
+                        tank1_df = pd.read_excel('Tank1.xlsx')
+                        tank2_df = pd.read_excel('Tank1-02.xlsx')
+                        
+                        tank1_data = tank1_df[['曝气压力', '曝气流量']].copy()
+                        tank2_data = tank2_df[['曝气压力', '曝气流量']].copy()
+                        
+                        tank1_data['Tank'] = 'Tank1 (8.01~8.17)'
+                        tank2_data['Tank'] = 'Tank1-02 (8.26~9.06)'
+                        
+                        tank1_data['Time_Index'] = range(len(tank1_data))
+                        tank2_data['Time_Index'] = range(len(tank2_data))
+                        
+                        tank1_data = tank1_data.dropna()
+                        tank2_data = tank2_data.dropna()
+                        
+                        error = None
+                except Exception as e2:
+                    error = f"Direct load also failed: {str(e2)}"
+                    tank1_data, tank2_data = None, None
+        
+        if tank1_data is None or tank2_data is None:
+            st.error(f"Failed to load XLSX data: {error}")
+            return
+        
+        # Show data overview
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"**Tank1 (8.01~8.17)**\n{len(tank1_data):,} data points")
+        with col2:
+            st.info(f"**Tank1-02 (8.26~9.06)**\n{len(tank2_data):,} data points")
+        
+        # Create side-by-side comparison charts
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("曝气压力 (Aeration Pressure) Comparison")
+            
+            # Sample data for performance if too large
+            tank1_sample = tank1_data.sample(min(10000, len(tank1_data))) if len(tank1_data) > 10000 else tank1_data
+            tank2_sample = tank2_data.sample(min(10000, len(tank2_data))) if len(tank2_data) > 10000 else tank2_data
+            
+            # Pressure comparison chart
+            fig_pressure = go.Figure()
+            
+            fig_pressure.add_trace(go.Scatter(
+                x=tank1_sample['Time_Index'],
+                y=tank1_sample['曝气压力'],
+                mode='lines',
+                name='Tank1 (8.01~8.17)',
+                line=dict(color='blue', width=1),
+                opacity=0.7
+            ))
+            
+            fig_pressure.add_trace(go.Scatter(
+                x=tank2_sample['Time_Index'],
+                y=tank2_sample['曝气压力'],
+                mode='lines',
+                name='Tank1-02 (8.26~9.06)',
+                line=dict(color='red', width=1),
+                opacity=0.7
+            ))
+            
+            fig_pressure.update_layout(
+                title="曝气压力 Over Time",
+                xaxis_title="Time Index",
+                yaxis_title="曝气压力 (Aeration Pressure)",
+                height=400,
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_pressure, use_container_width=True)
+            
+            # Pressure statistics
+            st.write("**曝气压力 Statistics:**")
+            pressure_stats = pd.DataFrame({
+                'Tank1 (8.01~8.17)': [
+                    tank1_data['曝气压力'].mean(),
+                    tank1_data['曝气压力'].std(),
+                    tank1_data['曝气压力'].min(),
+                    tank1_data['曝气压力'].max()
+                ],
+                'Tank1-02 (8.26~9.06)': [
+                    tank2_data['曝气压力'].mean(),
+                    tank2_data['曝气压力'].std(),
+                    tank2_data['曝气压力'].min(),
+                    tank2_data['曝气压力'].max()
+                ]
+            }, index=['Mean', 'Std Dev', 'Min', 'Max'])
+            
+            st.dataframe(pressure_stats.round(3), use_container_width=True)
+        
+        with col2:
+            st.subheader("曝气流量 (Aeration Flow) Comparison")
+            
+            # Flow comparison chart
+            fig_flow = go.Figure()
+            
+            fig_flow.add_trace(go.Scatter(
+                x=tank1_sample['Time_Index'],
+                y=tank1_sample['曝气流量'],
+                mode='lines',
+                name='Tank1 (8.01~8.17)',
+                line=dict(color='blue', width=1),
+                opacity=0.7
+            ))
+            
+            fig_flow.add_trace(go.Scatter(
+                x=tank2_sample['Time_Index'],
+                y=tank2_sample['曝气流量'],
+                mode='lines',
+                name='Tank1-02 (8.26~9.06)',
+                line=dict(color='red', width=1),
+                opacity=0.7
+            ))
+            
+            fig_flow.update_layout(
+                title="曝气流量 Over Time",
+                xaxis_title="Time Index",
+                yaxis_title="曝气流量 (Aeration Flow)",
+                height=400,
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_flow, use_container_width=True)
+            
+            # Flow statistics
+            st.write("**曝气流量 Statistics:**")
+            flow_stats = pd.DataFrame({
+                'Tank1 (8.01~8.17)': [
+                    tank1_data['曝气流量'].mean(),
+                    tank1_data['曝气流量'].std(),
+                    tank1_data['曝气流量'].min(),
+                    tank1_data['曝气流量'].max()
+                ],
+                'Tank1-02 (8.26~9.06)': [
+                    tank2_data['曝气流量'].mean(),
+                    tank2_data['曝气流量'].std(),
+                    tank2_data['曝气流量'].min(),
+                    tank2_data['曝气流量'].max()
+                ]
+            }, index=['Mean', 'Std Dev', 'Min', 'Max'])
+            
+            st.dataframe(flow_stats.round(3), use_container_width=True)
+        
+        # Combined distribution comparison
+        st.subheader("Distribution Comparison")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Pressure distribution histogram
+            fig_pressure_dist = go.Figure()
+            
+            fig_pressure_dist.add_trace(go.Histogram(
+                x=tank1_data['曝气压力'],
+                name='Tank1 (8.01~8.17)',
+                opacity=0.7,
+                nbinsx=30,
+                marker_color='blue'
+            ))
+            
+            fig_pressure_dist.add_trace(go.Histogram(
+                x=tank2_data['曝气压力'],
+                name='Tank1-02 (8.26~9.06)',
+                opacity=0.7,
+                nbinsx=30,
+                marker_color='red'
+            ))
+            
+            fig_pressure_dist.update_layout(
+                title="曝气压力 Distribution",
+                xaxis_title="曝气压力 (Aeration Pressure)",
+                yaxis_title="Frequency",
+                barmode='overlay',
+                height=400
+            )
+            
+            st.plotly_chart(fig_pressure_dist, use_container_width=True)
+        
+        with col2:
+            # Flow distribution histogram
+            fig_flow_dist = go.Figure()
+            
+            fig_flow_dist.add_trace(go.Histogram(
+                x=tank1_data['曝气流量'],
+                name='Tank1 (8.01~8.17)',
+                opacity=0.7,
+                nbinsx=30,
+                marker_color='blue'
+            ))
+            
+            fig_flow_dist.add_trace(go.Histogram(
+                x=tank2_data['曝气流量'],
+                name='Tank1-02 (8.26~9.06)',
+                opacity=0.7,
+                nbinsx=30,
+                marker_color='red'
+            ))
+            
+            fig_flow_dist.update_layout(
+                title="曝气流量 Distribution",
+                xaxis_title="曝气流量 (Aeration Flow)",
+                yaxis_title="Frequency",
+                barmode='overlay',
+                height=400
+            )
+            
+            st.plotly_chart(fig_flow_dist, use_container_width=True)
+        
+        # Key differences summary
+        st.subheader("Key Differences Summary")
+        
+        # Calculate differences (excluding zero values)
+        # Filter out zero values for more accurate comparison
+        tank1_pressure_nonzero = tank1_data[tank1_data['曝气压力'] != 0]['曝气压力']
+        tank2_pressure_nonzero = tank2_data[tank2_data['曝气压力'] != 0]['曝气压力']
+        tank1_flow_nonzero = tank1_data[tank1_data['曝气流量'] != 0]['曝气流量']
+        tank2_flow_nonzero = tank2_data[tank2_data['曝气流量'] != 0]['曝气流量']
+        
+        pressure_diff = tank2_pressure_nonzero.mean() - tank1_pressure_nonzero.mean()
+        flow_diff = tank2_flow_nonzero.mean() - tank1_flow_nonzero.mean()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Average 曝气压力 Difference", 
+                f"{pressure_diff:.3f}",
+                f"{'Higher' if pressure_diff > 0 else 'Lower'} in Tank1-02"
+            )
+        
+        with col2:
+            st.metric(
+                "Average 曝气流量 Difference", 
+                f"{flow_diff:.3f}",
+                f"{'Higher' if flow_diff > 0 else 'Lower'} in Tank1-02"
+            )
+        
+        with col3:
+            pressure_change_pct = (pressure_diff / tank1_pressure_nonzero.mean()) * 100
+            st.metric(
+                "曝气压力 Change %", 
+                f"{pressure_change_pct:.2f}%"
+            )
+        
+        with col4:
+            flow_change_pct = (flow_diff / tank1_flow_nonzero.mean()) * 100
+            st.metric(
+                "曝气流量 Change %", 
+                f"{flow_change_pct:.2f}%"
+            )
+        
+        # Show data points info
+        st.caption(f"**Note**: Calculations exclude zero values. "
+                  f"Tank1: {len(tank1_pressure_nonzero):,} non-zero pressure points, {len(tank1_flow_nonzero):,} non-zero flow points. "
+                  f"Tank1-02: {len(tank2_pressure_nonzero):,} non-zero pressure points, {len(tank2_flow_nonzero):,} non-zero flow points.")
+
     def create_pressure_distribution_analysis(self):
         """Create pressure distribution analysis."""
-        st.subheader("📊 Pressure Distribution Analysis")
+        st.subheader("Pressure Distribution Analysis")
         
         col1, col2 = st.columns(2)
         
@@ -326,50 +638,11 @@ class PressureDashboard:
             )
             st.plotly_chart(fig_dist, use_container_width=True)
     
-    def create_interactive_filters(self):
-        """Create interactive filters in sidebar."""
-        st.sidebar.header("🎛️ Dashboard Filters")
-        
-        # Date range filter
-        date_range = st.sidebar.date_input(
-            "Select Date Range",
-            value=(self.df['date'].min(), self.df['date'].max()),
-            min_value=self.df['date'].min(),
-            max_value=self.df['date'].max()
-        )
-        
-        # Operational state filter
-        states = st.sidebar.multiselect(
-            "Operational States",
-            options=self.df['operational_state'].unique(),
-            default=self.df['operational_state'].unique()
-        )
-        
-        # Pressure range filter
-        pressure_range = st.sidebar.slider(
-            "Pressure Range (kPa)",
-            min_value=float(self.df['pressure_kpa'].min()),
-            max_value=float(self.df['pressure_kpa'].max()),
-            value=(float(self.df['pressure_kpa'].min()), float(self.df['pressure_kpa'].max())),
-            step=0.1
-        )
-        
-        # Apply filters
-        mask = (
-            (self.df['date'] >= date_range[0]) &
-            (self.df['date'] <= date_range[1]) &
-            (self.df['operational_state'].isin(states)) &
-            (self.df['pressure_kpa'] >= pressure_range[0]) &
-            (self.df['pressure_kpa'] <= pressure_range[1])
-        )
-        
-        return mask
     
     def run_dashboard(self):
         """Run the complete dashboard."""
-        st.title("🏭 Air Pressure Machine Dashboard - New Segmentation")
-        st.markdown("### Shutdown: -0.1 to 0.1 kPa | Transition: other datapoints | Stable: > 20 kPa")
-        st.markdown("---")
+        st.title("MBR sensor and PLC data")
+
         
         # Load data
         with st.spinner("Loading pressure data..."):
@@ -380,16 +653,14 @@ class PressureDashboard:
             return
         
         self.df = df
-        st.success(f"✅ Successfully loaded {len(df):,} data points!")
+        st.success(f"{len(df):,} data points loaded")
         
-        # Apply filters
-        filter_mask = self.create_interactive_filters()
-        self.df = self.df[filter_mask]
         
         # Daily analysis (moved to top)
+
         self.create_daily_analysis()
-        st.markdown("---")
-        
+        st.markdown("Shutdown: -0.1 to 0.1 kPa | Transition: 0.1 to 20 kPa | Stable: > 20 kPa")
+        st.markdown("---")        
         # Overview metrics
         self.create_overview_metrics()
         st.markdown("---")
@@ -398,12 +669,16 @@ class PressureDashboard:
         self.create_main_timeline()
         st.markdown("---")
         
-        # Pressure distribution analysis
+        # Pressure distribution analysis (for pressure sensor data)
         self.create_pressure_distribution_analysis()
+        st.markdown("---")
+        
+        # XLSX Tank Comparison (separate tank data analysis)
+        self.create_xlsx_comparison()
         
         # Footer
         st.markdown("---")
-        st.markdown("**Dashboard created for Air Pressure Machine Analysis** | 📊 Redesigned segmentation for better visualization")
+        st.markdown("***Digital Hub China***")
 
 def main():
     dashboard = PressureDashboard()
